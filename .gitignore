@@ -139,3 +139,7 @@ cython_debug/
 
 config/
 downloaded_models/
+train_hw/
+valid_hw/
+weights/
+*.yml
