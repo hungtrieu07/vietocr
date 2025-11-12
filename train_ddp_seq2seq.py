@@ -1,3 +1,20 @@
+import torch
+import torch.optim.lr_scheduler as _lrs
+
+# --- PATCH: accept lr=... as alias for max_lr ---
+_OrigOneCycleLR = _lrs.OneCycleLR
+class _PatchedOneCycleLR(_OrigOneCycleLR):
+    def __init__(self, optimizer, *args, lr=None, max_lr=None, **kwargs):
+        if max_lr is None and lr is not None:
+            max_lr = lr
+        super().__init__(optimizer, max_lr=max_lr, **kwargs)
+
+_lrs.OneCycleLR = _PatchedOneCycleLR
+# --- end PATCH ---
+
+from vietocr.model.trainer import Trainer
+
+
 import os, time, argparse, torch, torch.distributed as dist
 from torch.utils.data import DataLoader, DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
