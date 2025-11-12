@@ -97,7 +97,9 @@ class Trainer:
 
         if self.is_ddp:
             torch.cuda.set_device(self.local_rank)
-            dist.init_process_group(backend="nccl", init_method="env://")
+            if torch.distributed.is_available() and not torch.distributed.is_initialized():
+                dist.init_process_group(backend="nccl", init_method="env://")
+
             # Force device to local rank so we don’t fight with config['device']
             self.device = torch.device(f"cuda:{self.local_rank}")
         else:
