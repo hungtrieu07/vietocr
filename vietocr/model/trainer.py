@@ -1,14 +1,17 @@
+import os
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data import DistributedSampler
+
 from vietocr.optim.optim import ScheduledOptim
 from vietocr.optim.labelsmoothingloss import LabelSmoothingLoss
 from torch.optim import Adam, SGD, AdamW
-from torch import nn
 from vietocr.tool.translate import build_model
 from vietocr.tool.translate import translate, batch_translate_beam_search
 from vietocr.tool.utils import download_weights
 from vietocr.tool.logger import Logger
 from vietocr.loader.aug import ImgAugTransformV2
 
-import yaml
 import torch
 from vietocr.loader.dataloader_v1 import DataGen
 from vietocr.loader.dataloader import OCRDataset, ClusterRandomSampler, Collator
@@ -16,12 +19,9 @@ from torch.utils.data import DataLoader
 from einops import rearrange
 from torch.optim.lr_scheduler import CosineAnnealingLR, CyclicLR, OneCycleLR
 
-import torchvision
-
 from vietocr.tool.utils import compute_accuracy
 from PIL import Image
 import numpy as np
-import os
 import matplotlib.pyplot as plt
 import time
 
@@ -66,11 +66,6 @@ class Trainer:
         self.scheduler = OneCycleLR(
             self.optimizer, total_steps=self.num_iters, **config["optimizer"]
         )
-        #        self.optimizer = ScheduledOptim(
-        #            Adam(self.model.parameters(), betas=(0.9, 0.98), eps=1e-09),
-        #            #config['transformer']['d_model'],
-        #            512,
-        #            **config['optimizer'])
 
         self.criterion = LabelSmoothingLoss(
             len(self.vocab), padding_idx=self.vocab.pad, smoothing=0.1
@@ -96,6 +91,25 @@ class Trainer:
             )
 
         self.train_losses = []
+
+        self.is_ddp = int(os.environ.get("WORLD_SIZE", "1")) > 1
+        self.local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+
+        if self.is_ddp:
+            torch.cuda.set_device(self.local_rank)
+            dist.init_process_group(backend="nccl", init_method="env://")
+            # Force device to local rank so we don’t fight with config['device']
+            self.device = torch.device(f"cuda:{self.local_rank}")
+        else:
+            # keep VietOCR behavior
+            self.device = torch.device(self.config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu'))
+
+        self.model = self.model.to(self.device)
+
+        if self.is_ddp:
+            # Important: wrap after moving to device
+            self.model = DDP(self.model, device_ids=[self.local_rank], output_device=self.local_rank, find_unused_parameters=False)
+
 
     def train(self):
         total_loss = 0
